@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import {
   SafeAreaView,
@@ -9,7 +10,6 @@ import {
   StatusBar,
   Alert,
 } from "react-native";
-
 type Product = {
   id: number;
   name: string;
