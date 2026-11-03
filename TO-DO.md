@@ -11,5 +11,5 @@ Minor Task:
 2) Simulate a fake tap-to-pay feature. Recovery Rush will only allow fake purchases once it has detected a fake NFC reading
 3) Populate the images of products with the actual images instead of placeholder images
 4) Add disclaimers throughout the app stating there are no known cures for hangovers. "No drinking and driving" message as well.
-5) Ideally, getting around 25-35 fake drinks for users to purchase.
+5) Ideally, getting around 15-25 fake drinks for users to purchase.
 6) Make the starting page a little more dynamic, have moving images. Make the Start button more pronounced and readable
