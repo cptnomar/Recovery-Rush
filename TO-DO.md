@@ -1,8 +1,8 @@
 TODO:
 
 Major Task:
-1) (Recovery Ranger) Chatbot feature, allows user to talk to ML model via text or speech, this chatbot will recommend drinks to user based on user response
-train our own ML model instead of using an existing one.
+1) (Recovery Ranger) Chatbot feature, allows user to talk to ML model via text or speech, this chatbot will recommend drinks to user based on user response.
+Train our own ML model instead of using an existing one.
 2) (Recovery Ride) Simulate a fake Uber, allows user to simulate ride request directly from the app. 
 App will use GPS coordinates and create fictional fares, riders, etc.
 
