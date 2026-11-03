@@ -13,3 +13,5 @@ Minor Task:
 4) Add disclaimers throughout the app stating there are no known cures for hangovers. "No drinking and driving" message as well.
 5) Ideally, getting around 15-25 fake drinks for users to purchase.
 6) Make the starting page a little more dynamic, have moving images. Make the Start button more pronounced and readable
+7) Set up a ticketing system such as Jira to assign tasks to the team
+8) Re do the directory to add the relevant files needed for this project.
