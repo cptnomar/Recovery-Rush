@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   SafeAreaView,
   View,
@@ -8,12 +8,13 @@ import {
   StyleSheet,
   StatusBar,
   useWindowDimensions,
+  Animated,
 } from "react-native";
 
 // Product information and inventory come from data/products.ts.
 import { initialProducts, type Product } from "./data/products";
 type Category = "All drinks" | "Drinks";
-type Screen = "welcome" | "catalog" | "cart" | "success";
+type Screen = "welcome" | "catalog" | "checkout" | "success";
 
 const INK = "#14212B";
 const YELLOW = "#FFDE32";
@@ -82,83 +83,84 @@ function ActionButton({ label, onPress, disabled = false, light = false, hint }:
   );
 }
 
-function QuantityControl({ product, count, add, remove }: { product: Product; count: number; add: () => void; remove: () => void }) {
-  const maxed = count >= product.stock;
-  return (
-    <View style={styles.quantityControl}>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Remove one ${product.name}`} onPress={remove} style={styles.quantityButton}>
-        <Text style={styles.quantitySymbol}>−</Text>
-      </TouchableOpacity>
-      <Text accessibilityLabel={`${count} in cart`} style={styles.quantityNumber}>{count}</Text>
-      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Add one ${product.name}`} accessibilityState={{ disabled: maxed }} disabled={maxed} onPress={add} style={[styles.quantityButton, maxed && { opacity: 0.3 }]}>
-        <Text style={styles.quantitySymbol}>+</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
 export default function App() {
   const { width } = useWindowDimensions();
   const isWide = width >= 700;
   const tiny = width < 370;
   const [screen, setScreen] = useState<Screen>("welcome");
   const [products, setProducts] = useState<Product[]>(() => initialProducts.map(p => ({ ...p })));
-  const [cart, setCart] = useState<Record<number, number>>({});
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [category, setCategory] = useState<Category>("All drinks");
-  const [receipt, setReceipt] = useState({ total: 0, count: 0 });
+  const [purchased, setPurchased] = useState<Product | null>(null);
   const [checkoutError, setCheckoutError] = useState("");
-  const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
-  const total = products.reduce((sum, p) => sum + p.price * (cart[p.id] || 0), 0);
+  const [dispensingComplete, setDispensingComplete] = useState(false);
+  const progress = useRef(new Animated.Value(0)).current;
+  const selected = products.find(p => p.id === selectedId);
   const visibleProducts = products.filter(p => category === "All drinks" || p.category === category);
 
-  function addToCart(product: Product) {
-    setCheckoutError("");
-    setCart(old => {
-      const count = old[product.id] || 0;
-      return count >= product.stock ? old : { ...old, [product.id]: count + 1 };
+  // The timer starts only on the confirmation screen, lasts 3.00–5.00 seconds,
+  // and is cancelled if the screen is left or the component unmounts.
+  useEffect(() => {
+    if (screen !== "success") return;
+    progress.setValue(0);
+    setDispensingComplete(false);
+    const duration = 3000 + Math.random() * 2000;
+    const animation = Animated.timing(progress, {
+      toValue: 1,
+      duration,
+      useNativeDriver: false, // Width animation requires the JS driver.
     });
-  }
+    animation.start(({ finished }) => {
+      if (finished) setDispensingComplete(true);
+    });
+    return () => animation.stop();
+  }, [screen, progress]);
 
-  function removeFromCart(id: number) {
+  function chooseProduct(product: Product) {
+    if (product.stock <= 0) return;
+    setSelectedId(product.id);
     setCheckoutError("");
-    setCart(old => {
-      const updated = { ...old };
-      if ((updated[id] || 0) <= 1) delete updated[id];
-      else updated[id] -= 1;
-      return updated;
-    });
+    setScreen("checkout");
   }
 
   function checkout() {
-    if (!cartCount) return;
-    if (products.some(p => (cart[p.id] || 0) > p.stock)) {
-      setCheckoutError("One of your drinks is out of stock. Please update your cart.");
+    if (!selected) return;
+    if (selected.stock <= 0) {
+      setCheckoutError("This drink is out of stock. Please select another.");
       return;
     }
-    setReceipt({ total, count: cartCount });
-    setProducts(old => old.map(p => ({ ...p, stock: p.stock - (cart[p.id] || 0) })));
-    setCart({});
+    setPurchased({ ...selected });
+    setProducts(old => old.map(p => p.id === selected.id ? { ...p, stock: p.stock - 1 } : p));
+    setSelectedId(null);
     setCheckoutError("");
     setScreen("success");
   }
 
+  function returnHome() {
+    if (!dispensingComplete) return;
+    setPurchased(null);
+    setSelectedId(null);
+    setCategory("All drinks");
+    setScreen("welcome");
+  }
+
   function resetDemo() {
     setProducts(initialProducts.map(p => ({ ...p })));
-    setCart({});
+    setSelectedId(null);
+    setPurchased(null);
     setCategory("All drinks");
-    setReceipt({ total: 0, count: 0 });
     setCheckoutError("");
     setScreen("welcome");
   }
 
-  const step = screen === "catalog" ? 1 : screen === "cart" ? 2 : 3;
+  const step = screen === "catalog" ? 1 : screen === "checkout" ? 2 : 3;
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" />
       <View style={[styles.machine, isWide && styles.machineWide]}>
         <View style={[styles.header, !isWide && styles.headerCompact]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Recovery Rush home" onPress={() => setScreen("welcome")} style={styles.brand}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Recovery Rush home" onPress={() => { if (screen !== "success") { setSelectedId(null); setScreen("welcome"); } }} style={styles.brand}>
             <View style={styles.logoTile}><Text style={styles.logoBolt}>ϟ</Text></View>
             <View>
               <Text style={styles.logoText}>RECOVERY RUSH<Text style={{ color: YELLOW }}>.</Text></Text>
@@ -167,13 +169,7 @@ export default function App() {
           </TouchableOpacity>
           <View style={styles.headerRight}>
             {isWide && <View style={styles.liveStatus}><View style={styles.liveDot} /><Text style={styles.liveText}>CHILLED & READY</Text></View>}
-            {screen === "welcome" ? (
-              <View style={styles.editionTag}><Text style={styles.editionText}>VOL. 01</Text></View>
-            ) : (
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`View cart, ${cartCount} drinks`} onPress={() => setScreen("cart")} style={styles.headerCart}>
-                <Text style={styles.headerCartText}>CART</Text><View style={styles.cartBadge}><Text style={styles.cartBadgeText}>{cartCount}</Text></View>
-              </TouchableOpacity>
-            )}
+            <View style={styles.editionTag}><Text style={styles.editionText}>VOL. 01</Text></View>
           </View>
         </View>
 
@@ -222,7 +218,7 @@ export default function App() {
 
         {screen !== "welcome" && (
           <View style={styles.stepsBar}>
-            {["CHOOSE", "YOUR CART", "POWER UP"].map((label, i) => (
+            {["CHOOSE", "REVIEW", "DISPENSE"].map((label, i) => (
               <View key={label} style={styles.stepItem}>
                 <View style={[styles.stepCircle, step === i + 1 && styles.stepCircleActive, step > i + 1 && styles.stepCircleDone]}><Text style={[styles.stepNumber, step >= i + 1 && { color: INK }]}>{step > i + 1 ? "✓" : `0${i + 1}`}</Text></View>
                 <Text style={[styles.stepLabel, step === i + 1 && styles.stepLabelActive]}>{label}</Text>
@@ -259,98 +255,78 @@ export default function App() {
               </ScrollView>
 
               <View style={[styles.productGrid, { columnGap: tiny ? 0 : isWide ? 10 : 12 }]}>
-                {visibleProducts.map(product => {
-                  const count = cart[product.id] || 0;
-                  const available = product.stock - count;
-                  return (
-                    <View key={product.id} style={[styles.productCard, { width: tiny ? "100%" : isWide ? "31%" : "48%" }]}>
-                      <View style={[styles.productArt, { backgroundColor: productTint(product), height: isWide ? 168 : 148 }]}>
-                        <View style={styles.cardTopLine}><Text style={styles.productCode}>NO. 0{product.id}</Text><View style={[styles.typeBadge, { backgroundColor: productColor(product) }]}><Text style={styles.typeSymbol}>{product.emoji}</Text></View></View>
-                        <View style={[styles.productHalo, { backgroundColor: productColor(product) }]} />
-                        <View style={{ marginTop: 10 }}><DrinkCan product={product} scale={isWide ? 0.91 : 0.78} rotate="-7deg" /></View>
-                        {product.stock === 0 && <View style={styles.soldOverlay}><Text style={styles.soldLabel}>SOLD OUT</Text></View>}
-                        
-                      </View>
-                      <View style={[styles.productInfo, !isWide && { padding: 12 }]}>
-                        <Text style={[styles.productName, !isWide && { fontSize: 16 }]}>{product.name}</Text>
-                        <Text style={styles.productFlavor}>{product.category.toUpperCase()}</Text>
-                        <Text style={[styles.nutritionText, { marginTop: 10, lineHeight: 15 }]}>{product.description || "Hydration beverage"}</Text>
-                        <View style={styles.cardPriceRow}><Text style={styles.price}>{money(product.price)}</Text><Text style={[styles.stockText, !available && { color: "#8A4962" }]}>{available ? `${available} left` : product.stock ? "All in cart" : "Sold out"}</Text></View>
-                        {count > 0 ? (
-                          <QuantityControl product={product} count={count} add={() => addToCart(product)} remove={() => removeFromCart(product.id)} />
-                        ) : (
-                          <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Add ${product.name} to cart`} accessibilityState={{ disabled: available <= 0 }} disabled={available <= 0} onPress={() => addToCart(product)} style={[styles.addButton, available <= 0 && styles.addDisabled]}>
-                            <Text style={styles.addLabel}>{available > 0 ? "ADD TO CART" : "SOLD OUT"}</Text><Text style={styles.addPlus}>+</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
+                {visibleProducts.map(product => (
+                  <View key={product.id} style={[styles.productCard, { width: tiny ? "100%" : isWide ? "31%" : "48%" }]}>
+                    <View style={[styles.productArt, { backgroundColor: productTint(product), height: isWide ? 168 : 148 }]}>
+                      <View style={styles.cardTopLine}><Text style={styles.productCode}>NO. 0{product.id}</Text><View style={[styles.typeBadge, { backgroundColor: productColor(product) }]}><Text style={styles.typeSymbol}>{product.emoji}</Text></View></View>
+                      <View style={[styles.productHalo, { backgroundColor: productColor(product) }]} />
+                      <View style={{ marginTop: 10 }}><DrinkCan product={product} scale={isWide ? 0.91 : 0.78} rotate="-7deg" /></View>
+                      {product.stock === 0 && <View style={styles.soldOverlay}><Text style={styles.soldLabel}>SOLD OUT</Text></View>}
                     </View>
-                  );
-                })}
+                    <View style={[styles.productInfo, !isWide && { padding: 12 }]}>
+                      <Text style={[styles.productName, !isWide && { fontSize: 16 }]}>{product.name}</Text>
+                      <Text style={styles.productFlavor}>{product.category.toUpperCase()}</Text>
+                      <Text style={[styles.nutritionText, { marginTop: 10, lineHeight: 15 }]}>{product.description || "Hydration beverage"}</Text>
+                      <View style={styles.cardPriceRow}><Text style={styles.price}>{money(product.price)}</Text><Text style={styles.stockText}>{product.stock ? `${product.stock} left` : "Sold out"}</Text></View>
+                      <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Select ${product.name}`} accessibilityState={{ disabled: product.stock === 0 }} disabled={product.stock === 0} onPress={() => chooseProduct(product)} style={[styles.addButton, product.stock === 0 && styles.addDisabled]}>
+                        <Text style={styles.addLabel}>{product.stock ? "SELECT DRINK" : "SOLD OUT"}</Text><Text style={styles.addPlus}>→</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
               </View>
               <Text style={styles.catalogFootnote}>DEMO MODE · SAMPLE PRICES · NO REAL PAYMENTS</Text>
             </ScrollView>
-            <View style={[styles.cartDock, !isWide && { paddingHorizontal: 18 }]}>
-              <View style={styles.dockInfo}><View style={styles.dockCount}><Text style={styles.dockCountText}>{cartCount}</Text></View><View><Text style={styles.dockLabel}>{tiny ? "YOUR ENERGY MIX" : cartCount ? "YOUR ENERGY MIX" : "BUILD YOUR ENERGY MIX"}</Text><Text style={styles.dockTotal}>{money(total)}{!tiny && <Text style={styles.dockTotalCaption}>  / {cartCount} {cartCount === 1 ? "drink" : "drinks"}</Text>}</Text></View></View>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="View cart" accessibilityState={{ disabled: cartCount === 0 }} disabled={cartCount === 0} onPress={() => setScreen("cart")} style={[styles.dockButton, !cartCount && styles.dockDisabled]}><Text style={styles.dockButtonText}>{isWide ? "REVIEW YOUR CART" : "VIEW CART"}  →</Text></TouchableOpacity>
-            </View>
+
           </>
         )}
 
-        {screen === "cart" && (
-          <ScrollView key="cart" contentContainerStyle={[styles.cartContent, !isWide && styles.contentCompact]}>
-            <TouchableOpacity accessibilityRole="button" onPress={() => setScreen("catalog")} style={styles.backButton}><Text style={styles.backText}>← BACK TO THE LINEUP</Text></TouchableOpacity>
-            <Text style={[styles.pageTitle, !isWide && { fontSize: 35, lineHeight: 39 }]}>YOUR ENERGY MIX<Text style={{ color: "#6A897C" }}>.</Text></Text>
-            <Text style={styles.pageSubtitle}>Good choices. Great taste. Ready when you are.</Text>
-            {cartCount === 0 ? (
-              <View style={styles.emptyCart}>
-                <View style={styles.emptyIcon}><Text style={styles.emptyBolt}>ϟ</Text></View>
-                <Text style={styles.emptyTitle}>Running on empty?</Text>
-                <Text style={styles.emptyText}>Your next favorite flavor is waiting in the lineup.</Text>
-                <View style={{ width: "100%", maxWidth: 350 }}><ActionButton label="EXPLORE THE DRINKS" onPress={() => setScreen("catalog")} /></View>
-              </View>
-            ) : (
-              <View style={[styles.checkoutLayout, isWide && { flexDirection: "row", alignItems: "flex-start" }]}>
-                <View style={{ flex: 1, width: "100%" }}>
-                  {products.filter(p => (cart[p.id] || 0) > 0).map(product => (
-                    <View key={product.id} style={styles.cartItem}>
-                      <View style={[styles.cartCanBox, { backgroundColor: productTint(product) }]}><DrinkCan product={product} scale={0.48} rotate="-7deg" /></View>
-                      <View style={styles.cartItemInfo}>
-                        <Text style={[styles.productName, { fontSize: 17 }]}>{product.name}</Text>
-                        <Text style={styles.cartItemDetail}>{money(product.price)} each · {product.category}</Text>
-                        <View style={styles.cartItemBottom}><View style={{ width: 126 }}><QuantityControl product={product} count={cart[product.id]} add={() => addToCart(product)} remove={() => removeFromCart(product.id)} /></View><Text style={styles.cartLineTotal}>{money(product.price * cart[product.id])}</Text></View>
-                      </View>
-                    </View>
-                  ))}
-                  <View style={styles.mixNote}><Text style={styles.mixNoteIcon}>✦</Text><Text style={styles.mixNoteText}>Your hydration picks, ready for simulated checkout.</Text></View>
+        {screen === "checkout" && (
+          <ScrollView contentContainerStyle={[styles.cartContent, styles.checkoutScreen]}>
+            <TouchableOpacity accessibilityRole="button" onPress={() => setScreen("catalog")} style={styles.backButton}><Text style={styles.backText}>← BACK TO DRINKS</Text></TouchableOpacity>
+            <Text style={[styles.pageTitle, styles.centeredTitle, !isWide && { fontSize: 30 }]}>CONFIRM YOUR SELECTION</Text>
+            <Text style={[styles.pageSubtitle, styles.centeredTitle]}>Review your drink before purchasing.</Text>
+            {selected && (
+              <View style={[styles.selectionCard, isWide && styles.selectionCardWide]}>
+                <View style={[styles.selectionArtwork, { backgroundColor: productTint(selected) }]}>
+                  <DrinkCan product={selected} scale={isWide ? 1.45 : 1.12} />
                 </View>
-                <View style={[styles.receipt, isWide && { width: 306 }]}>
-                  <View style={styles.receiptHeading}><Text style={styles.receiptTitle}>THE GAME PLAN</Text><Text style={styles.receiptBolt}>ϟ</Text></View>
-                  <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Drinks selected</Text><Text style={styles.receiptValue}>{cartCount}</Text></View>
-                  <View style={styles.receiptRow}><Text style={styles.receiptLabel}>Subtotal</Text><Text style={styles.receiptValue}>{money(total)}</Text></View>
-                  <View style={styles.receiptDivider} />
-                  <View style={styles.receiptRow}><Text style={styles.receiptTotalLabel}>TOTAL</Text><Text style={styles.receiptTotal}>{money(total)}</Text></View>
-                  {!!checkoutError && <Text accessibilityRole="alert" style={styles.errorText}>{checkoutError}</Text>}
-                  <ActionButton label="POWER UP" onPress={checkout} hint="Complete a simulated purchase. No payment is charged." />
-                  <View style={styles.demoPill}><Text style={styles.demoPillText}>DEMO CHECKOUT · NO CHARGE</Text></View>
-                  <Text style={styles.receiptNote}>This is a vending-machine simulation. No payment or physical dispensing takes place.</Text>
+                <View style={styles.selectionDetails}>
+                  <Text style={styles.selectionName}>{selected.name}</Text>
+                  <Text style={styles.selectionCategory}>{selected.category}</Text>
+                  <Text style={styles.selectionDescription}>{selected.description || "Hydration beverage"}</Text>
+                  <Text style={styles.selectionPrice}>{money(selected.price)}</Text>
+                  <Text style={styles.selectionStock}>In stock: {selected.stock}</Text>
                 </View>
               </View>
             )}
+            {!!checkoutError && <Text accessibilityRole="alert" style={styles.errorText}>{checkoutError}</Text>}
+            <View style={styles.checkoutActions}>
+              <ActionButton label="PURCHASE DRINK" onPress={checkout} disabled={!selected || selected.stock <= 0} hint="Simulate purchasing one drink. No payment is charged." />
+              <TouchableOpacity accessibilityRole="button" style={styles.outlineButton} onPress={() => setScreen("catalog")}><Text style={styles.outlineButtonText}>CHOOSE A DIFFERENT DRINK</Text></TouchableOpacity>
+              <Text style={styles.checkoutDisclaimer}>DEMO CHECKOUT · NO REAL PAYMENT OR DISPENSING</Text>
+            </View>
           </ScrollView>
         )}
 
-        {screen === "success" && (
-          <ScrollView key="success" contentContainerStyle={styles.successScroll}>
-            <View style={styles.successCard}>
-              <View style={styles.successArt}><View style={styles.successRing} /><View style={styles.successCheck}><Text style={styles.successCheckText}>✓</Text></View><Text style={styles.successSparkLeft}>✦</Text><Text style={styles.successSparkRight}>✦</Text></View>
-              <View style={styles.successPill}><Text style={styles.successPillText}>MISSION COMPLETE</Text></View>
-              <Text style={[styles.successTitle, { fontSize: isWide ? 56 : 42, lineHeight: isWide ? 55 : 43 }]}>YOU'RE ALL{"\n"}CHARGED UP.</Text>
-              <Text style={styles.successDescription}>Excellent taste. Your simulated order is complete.</Text>
-              <View style={styles.successSummary}><View><Text style={styles.successSummaryLabel}>DRINKS IN YOUR MIX</Text><Text style={styles.successSummaryValue}>{receipt.count.toString().padStart(2, "0")}</Text></View><View style={styles.summaryLine} /><View><Text style={styles.successSummaryLabel}>SIMULATED TOTAL</Text><Text style={styles.successSummaryValue}>{money(receipt.total)}</Text></View></View>
-              <View style={{ width: "100%", maxWidth: 360 }}><ActionButton label="BACK TO THE LINEUP" onPress={() => setScreen("catalog")} /></View>
-              <TouchableOpacity accessibilityRole="button" onPress={resetDemo} style={styles.resetButton}><Text style={styles.resetText}>↻ Reset demo & restock</Text></TouchableOpacity>
-              <Text style={styles.successFootnote}>NO PAYMENT WAS TAKEN. NO DRINK WAS DISPENSED.</Text>
+        {screen === "success" && purchased && (
+          <ScrollView key="success" contentContainerStyle={styles.dispensingScroll}>
+            <View style={styles.dispensingCard}>
+              <View style={styles.dispensingIcon}><Text style={styles.dispensingCheck}>{dispensingComplete ? "✓" : "ϟ"}</Text></View>
+              <Text style={styles.dispensingHeading}>{dispensingComplete ? "DISPENSING COMPLETE!" : "PURCHASE CONFIRMED!"}</Text>
+              <Text style={styles.dispensingSubheading}>{dispensingComplete ? "Your simulated drink is ready." : "Your drink is being dispensed."}</Text>
+              <View style={styles.dispensingProduct}>
+                <View style={{ backgroundColor: productTint(purchased), padding: 12, borderRadius: 10 }}><DrinkCan product={purchased} scale={0.55} /></View>
+                <View style={{ flex: 1, gap: 7 }}><Text style={styles.dispensingName}>{purchased.name}</Text><Text style={styles.dispensingPrice}>{money(purchased.price)}</Text><Text style={styles.dispensingCategory}>{purchased.category}</Text></View>
+              </View>
+              <View style={styles.progressArea}>
+                <View style={styles.progressTrack}>
+                  <Animated.View style={[styles.progressFill, { width: progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }) }]} />
+                </View>
+                <Text accessibilityRole="text" style={styles.progressLabel}>{dispensingComplete ? "Complete!" : "Dispensing your drink..."}</Text>
+              </View>
+              {dispensingComplete && <View style={styles.homeButtonWrap}><ActionButton label="RETURN TO HOME" onPress={returnHome} light /></View>}
+              <Text style={styles.checkoutDisclaimer}>SIMULATION ONLY · NO PAYMENT TAKEN · NO PHYSICAL DISPENSING</Text>
             </View>
           </ScrollView>
         )}
@@ -555,4 +531,35 @@ const styles = StyleSheet.create({
   resetButton: { padding: 16, marginTop: 5, minHeight: 44 },
   resetText: { fontSize: 11, color: "#617656", fontWeight: "600" },
   successFootnote: { fontSize: 6.5, fontWeight: "700", letterSpacing: 0.6, color: "#859176", textAlign: "center", marginTop: 8 },
+  checkoutScreen: { alignItems: "center", paddingBottom: 42 },
+  centeredTitle: { textAlign: "center" },
+  selectionCard: { width: "100%", maxWidth: 820, borderRadius: 16, borderWidth: 2, borderColor: AQUA, backgroundColor: INK, overflow: "hidden", marginTop: 14 },
+  selectionCardWide: { flexDirection: "row" },
+  selectionArtwork: { minHeight: 230, minWidth: 230, flex: 1, alignItems: "center", justifyContent: "center", padding: 20 },
+  selectionDetails: { flex: 1.5, padding: 28, justifyContent: "center" },
+  selectionName: { fontSize: 32, fontWeight: "900", color: "#FFFFFF" },
+  selectionCategory: { color: AQUA, fontWeight: "800", marginTop: 7 },
+  selectionDescription: { color: "#D4E1E1", fontSize: 15, lineHeight: 23, marginTop: 16 },
+  selectionPrice: { color: YELLOW, fontSize: 43, fontWeight: "900", marginTop: 22 },
+  selectionStock: { color: "#B9C9CB", fontSize: 13, marginTop: 4 },
+  checkoutActions: { width: "100%", maxWidth: 820, gap: 14, marginTop: 26 },
+  outlineButton: { minHeight: 52, borderRadius: 8, borderWidth: 2, borderColor: AQUA, alignItems: "center", justifyContent: "center", padding: 12 },
+  outlineButtonText: { color: INK, fontSize: 12, fontWeight: "900" },
+  checkoutDisclaimer: { color: "#82918B", textAlign: "center", fontSize: 9, marginTop: 14 },
+  dispensingScroll: { flexGrow: 1, justifyContent: "center", alignItems: "center", padding: 24, backgroundColor: INK },
+  dispensingCard: { width: "100%", maxWidth: 640, alignItems: "center", gap: 12 },
+  dispensingIcon: { borderWidth: 4, borderColor: AQUA, width: 90, height: 90, borderRadius: 45, justifyContent: "center", alignItems: "center", marginBottom: 10 },
+  dispensingCheck: { color: AQUA, fontSize: 55, fontWeight: "900" },
+  dispensingHeading: { color: "#FFFFFF", fontSize: 32, fontWeight: "900", textAlign: "center" },
+  dispensingSubheading: { color: "#B9C9CB", fontSize: 15, textAlign: "center" },
+  dispensingProduct: { flexDirection: "row", alignItems: "center", gap: 22, borderColor: AQUA, borderWidth: 1.5, borderRadius: 15, padding: 16, width: "100%", marginTop: 18 },
+  dispensingName: { color: "#FFFFFF", fontSize: 24, fontWeight: "900" },
+  dispensingPrice: { color: YELLOW, fontSize: 30, fontWeight: "900" },
+  dispensingCategory: { color: AQUA, fontSize: 12 },
+  progressArea: { width: "100%", marginTop: 20, gap: 12 },
+  progressTrack: { height: 16, backgroundColor: "#38515A", borderRadius: 10, overflow: "hidden" },
+  progressFill: { height: "100%", backgroundColor: AQUA, borderRadius: 10 },
+  progressLabel: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", textAlign: "center" },
+  homeButtonWrap: { width: "100%", marginTop: 12 },
+
 });
