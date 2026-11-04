@@ -10,37 +10,19 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-// A self-contained Expo / React Native demo. No assets or extra packages needed.
-// The drinks, nutrition labels, and purchases in this demo are fictional.
-type Category = "All drinks" | "Citrus" | "Berry" | "Tropical" | "Zero sugar";
+// Product information and inventory come from data/products.ts.
+import { initialProducts, type Product } from "./data/products";
+type Category = "All drinks" | "Drinks";
 type Screen = "welcome" | "catalog" | "cart" | "success";
-type Product = {
-  id: number;
-  name: string;
-  flavor: string;
-  shortName: string;
-  price: number;
-  stock: number;
-  color: string;
-  tint: string;
-  category: "Citrus" | "Berry" | "Tropical";
-  sugar: number;
-  caffeine: number;
-  symbol: string;
-};
 
 const INK = "#14212B";
 const YELLOW = "#FFDE32";
 const AQUA = "#61E8D3";
-const INITIAL_PRODUCTS: Product[] = [
-  { id: 1, name: "Lightning Lime", flavor: "LIME + LEMON", shortName: "LIME", price: 3.5, stock: 12, color: "#C2EC49", tint: "#F0F8D5", category: "Citrus", sugar: 0, caffeine: 160, symbol: "ϟ" },
-  { id: 2, name: "Berry Burst", flavor: "RASPBERRY + CHERRY", shortName: "BERRY", price: 3.75, stock: 8, color: "#F99AC1", tint: "#FDE8F1", category: "Berry", sugar: 8, caffeine: 160, symbol: "✦" },
-  { id: 3, name: "Arctic Rush", flavor: "BLUE RASPBERRY", shortName: "ARCTIC", price: 3.5, stock: 10, color: "#7CDDDD", tint: "#E1F6F4", category: "Berry", sugar: 0, caffeine: 160, symbol: "❄" },
-  { id: 4, name: "Solar Orange", flavor: "ORANGE + YUZU", shortName: "SOLAR", price: 3.5, stock: 6, color: "#FFB567", tint: "#FFF0DF", category: "Citrus", sugar: 8, caffeine: 160, symbol: "☀" },
-  { id: 5, name: "Cosmic Grape", flavor: "GRAPE + ACAI", shortName: "COSMIC", price: 3.75, stock: 9, color: "#BFA4EE", tint: "#F0E9FB", category: "Berry", sugar: 0, caffeine: 160, symbol: "✧" },
-  { id: 6, name: "Tropical Charge", flavor: "MANGO + PASSION FRUIT", shortName: "TROPIC", price: 4, stock: 7, color: "#F6D658", tint: "#FFF7D9", category: "Tropical", sugar: 8, caffeine: 160, symbol: "ϟ" },
-];
-const CATEGORIES: Category[] = ["All drinks", "Citrus", "Berry", "Tropical", "Zero sugar"];
+const CATEGORIES: Category[] = ["All drinks", "Drinks"];
+const PRODUCT_COLORS = ["#C2EC49", "#7CDDDD", "#F99AC1", "#FFB567", "#BFA4EE"];
+const PRODUCT_TINTS = ["#F0F8D5", "#E1F6F4", "#FDE8F1", "#FFF0DF", "#F0E9FB"];
+const productColor = (p: Product) => PRODUCT_COLORS[(p.id - 1) % PRODUCT_COLORS.length];
+const productTint = (p: Product) => PRODUCT_TINTS[(p.id - 1) % PRODUCT_TINTS.length];
 const money = (amount: number) => "$" + amount.toFixed(2);
 
 function DotPattern({ color = INK }: { color?: string }) {
@@ -62,17 +44,17 @@ function DrinkCan({ product, scale = 1, rotate = "0deg" }: { product: Product; s
       style={{ width: 82 * scale, height: 150 * scale, transform: [{ rotate: rotate as `${number}deg` }] }}
     >
       <View style={[styles.canShadow, { height: 12 * scale, bottom: -6 * scale }]} />
-      <View style={[styles.canBody, { top: 5 * scale, bottom: 5 * scale, borderRadius: 12 * scale, backgroundColor: product.color }]}>
+      <View style={[styles.canBody, { top: 5 * scale, bottom: 5 * scale, borderRadius: 12 * scale, backgroundColor: productColor(product) }]}>
         <View style={[styles.canSide, { width: 10 * scale }]} />
         <View style={[styles.canHighlight, { left: 7 * scale, width: 5 * scale }]} />
         <View style={[styles.canSlash, { width: 29 * scale, height: 160 * scale, right: 2 * scale, top: 13 * scale }]} />
-        <Text style={[styles.canMicro, { fontSize: 5.3 * scale, letterSpacing: 1.7 * scale, marginTop: 17 * scale }]}>ENERGY DRINK</Text>
-        <Text style={[styles.canBrand, { fontSize: 26 * scale, lineHeight: 30 * scale, letterSpacing: -2 * scale }]}>VOLT</Text>
-        <Text style={[styles.canBolt, { fontSize: 51 * scale, lineHeight: 55 * scale }]}>{product.symbol}</Text>
+        <Text style={[styles.canMicro, { fontSize: 5.3 * scale, letterSpacing: 1.7 * scale, marginTop: 17 * scale }]}>RECOVERY RUSH</Text>
+        <Text style={[styles.canBrand, { fontSize: 26 * scale, lineHeight: 30 * scale, letterSpacing: -2 * scale }]}>RR</Text>
+        <Text style={[styles.canBolt, { fontSize: 51 * scale, lineHeight: 55 * scale }]}>{product.emoji}</Text>
         <View style={[styles.canFlavorBar, { paddingVertical: 3 * scale }]}>
-          <Text style={[styles.canFlavor, { fontSize: 6.4 * scale, letterSpacing: 1.2 * scale }]}>{product.shortName}</Text>
+          <Text style={[styles.canFlavor, { fontSize: 6.4 * scale, letterSpacing: 1.2 * scale }]}>{product.name.toUpperCase()}</Text>
         </View>
-        <Text style={[styles.canVolume, { fontSize: 4.8 * scale, marginTop: 4 * scale }]}>500 ML · ELECTRIC FLAVOR</Text>
+        <Text style={[styles.canVolume, { fontSize: 4.8 * scale, marginTop: 4 * scale }]}>DEMO PRODUCT</Text>
       </View>
       <View style={[styles.canRim, { height: 10 * scale, borderRadius: 8 * scale }]}>
         <View style={{ width: 18 * scale, height: 4 * scale, borderRadius: 5 * scale, backgroundColor: "#7A8787", borderWidth: 1, borderColor: "#A6B1AF" }} />
@@ -120,14 +102,14 @@ export default function App() {
   const isWide = width >= 700;
   const tiny = width < 370;
   const [screen, setScreen] = useState<Screen>("welcome");
-  const [products, setProducts] = useState<Product[]>(() => INITIAL_PRODUCTS.map(p => ({ ...p })));
+  const [products, setProducts] = useState<Product[]>(() => initialProducts.map(p => ({ ...p })));
   const [cart, setCart] = useState<Record<number, number>>({});
   const [category, setCategory] = useState<Category>("All drinks");
   const [receipt, setReceipt] = useState({ total: 0, count: 0 });
   const [checkoutError, setCheckoutError] = useState("");
   const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
   const total = products.reduce((sum, p) => sum + p.price * (cart[p.id] || 0), 0);
-  const visibleProducts = products.filter(p => category === "All drinks" || (category === "Zero sugar" ? p.sugar === 0 : p.category === category));
+  const visibleProducts = products.filter(p => category === "All drinks" || p.category === category);
 
   function addToCart(product: Product) {
     setCheckoutError("");
@@ -161,7 +143,7 @@ export default function App() {
   }
 
   function resetDemo() {
-    setProducts(INITIAL_PRODUCTS.map(p => ({ ...p })));
+    setProducts(initialProducts.map(p => ({ ...p })));
     setCart({});
     setCategory("All drinks");
     setReceipt({ total: 0, count: 0 });
@@ -199,9 +181,9 @@ export default function App() {
           <ScrollView contentContainerStyle={styles.welcomeScroll}>
             <View style={[styles.welcomeHero, isWide && styles.welcomeHeroWide]}>
               <View style={[styles.welcomeCopy, isWide && { flex: 1, paddingRight: 0 }]}>
-                <View style={styles.seriesPill}><Text style={styles.seriesText}>ϟ THE VOLT COLLECTION</Text></View>
+                <View style={styles.seriesPill}><Text style={styles.seriesText}>ϟ THE RECOVERY COLLECTION</Text></View>
                 <Text style={[styles.heroTitle, { fontSize: isWide ? 66 : 48, lineHeight: isWide ? 65 : 48 }]}>BIG FLAVOR.{"\n"}FULL <Text style={styles.heroOutline}>CHARGE.</Text></Text>
-                <Text style={styles.heroDescription}>Meet your next power-up. Six electric flavors, one very good decision.</Text>
+                <Text style={styles.heroDescription}>Explore our hydration drink lineup and find your next refreshment.</Text>
                 <View style={styles.heroButton}><ActionButton label="CHOOSE YOUR ENERGY" onPress={() => setScreen("catalog")} /></View>
                 <Text style={styles.heroNote}>ICE COLD. READY WHEN YOU ARE.</Text>
               </View>
@@ -210,18 +192,18 @@ export default function App() {
                 <View style={styles.orbitRing} />
                 <View style={[styles.burstLine, { transform: [{ rotate: "-25deg" }], top: "16%", left: "10%" }]} />
                 <View style={[styles.burstLine, { transform: [{ rotate: "30deg" }], top: "23%", right: "8%" }]} />
-                <View style={[styles.heroCanLeft, { left: isWide ? "7%" : "13%", top: isWide ? "25%" : "24%" }]}><DrinkCan product={products[1]} scale={isWide ? 1.5 : 1.1} rotate="-17deg" /></View>
-                <View style={[styles.heroCanRight, { right: isWide ? "4%" : "10%", top: isWide ? "25%" : "24%" }]}><DrinkCan product={products[2]} scale={isWide ? 1.5 : 1.1} rotate="17deg" /></View>
-                <View style={[styles.heroCanCenter, { top: isWide ? "13%" : "10%" }]}><DrinkCan product={products[0]} scale={isWide ? 1.95 : 1.48} rotate="-5deg" /></View>
+                <View style={[styles.heroCanLeft, { left: isWide ? "7%" : "13%", top: isWide ? "25%" : "24%" }]}><DrinkCan product={(products[1] || products[0])} scale={isWide ? 1.5 : 1.1} rotate="-17deg" /></View>
+                <View style={[styles.heroCanRight, { right: isWide ? "4%" : "10%", top: isWide ? "25%" : "24%" }]}><DrinkCan product={(products[2] || products[0])} scale={isWide ? 1.5 : 1.1} rotate="17deg" /></View>
+                <View style={[styles.heroCanCenter, { top: isWide ? "13%" : "10%" }]}><DrinkCan product={(products[0])} scale={isWide ? 1.95 : 1.48} rotate="-5deg" /></View>
                 <View style={styles.powerSticker}><Text style={styles.stickerBolt}>ϟ</Text><Text style={styles.stickerText}>PICK YOUR{"\n"}POWER-UP</Text></View>
                 <View style={styles.artSpark}><Text style={styles.artSparkText}>✦</Text></View>
                 <DotPattern />
               </View>
             </View>
             <View style={styles.ticker}>
-              <Text style={styles.tickerText}>SIX FLAVORS</Text><Text style={styles.tickerStar}>✦</Text>
+              <Text style={styles.tickerText}>FIVE DRINKS</Text><Text style={styles.tickerStar}>✦</Text>
               <Text style={styles.tickerText}>ZERO BORING</Text><Text style={styles.tickerStar}>✦</Text>
-              <Text style={styles.tickerText}>ALL ENERGY</Text>
+              <Text style={styles.tickerText}>STAY REFRESHED</Text>
             </View>
             <View style={[styles.welcomeBottom, !isWide && { paddingHorizontal: 22 }]}>
               <View style={styles.welcomeInstructions}>
@@ -234,7 +216,7 @@ export default function App() {
                 ))}
               </View>
             </View>
-            <View style={styles.demoFooter}><Text style={styles.demoFooterText}>INTERACTIVE DEMO · FICTIONAL DRINKS · NO REAL PAYMENTS</Text></View>
+            <View style={styles.demoFooter}><Text style={styles.demoFooterText}>INTERACTIVE DEMO · NO REAL PAYMENTS</Text></View>
           </ScrollView>
         )}
 
@@ -261,13 +243,13 @@ export default function App() {
                 </View>
                 {!tiny && <View style={[styles.promoArt, { width: isWide ? 230 : 100 }]}>
                   <View style={styles.promoCircle} />
-                  {isWide && <View style={{ position: "absolute", left: 10, top: 15 }}><DrinkCan product={products[2]} scale={0.92} rotate="-20deg" /></View>}
-                  <View style={{ transform: [{ rotate: "12deg" }] }}><DrinkCan product={products[0]} scale={isWide ? 1.05 : 0.82} /></View>
+                  {isWide && <View style={{ position: "absolute", left: 10, top: 15 }}><DrinkCan product={(products[2] || products[0])} scale={0.92} rotate="-20deg" /></View>}
+                  <View style={{ transform: [{ rotate: "12deg" }] }}><DrinkCan product={(products[0])} scale={isWide ? 1.05 : 0.82} /></View>
                 </View>}
                 <DotPattern />
               </View>
 
-              <View style={styles.collectionHeading}><Text style={styles.collectionTitle}>THE LINEUP <Text style={styles.collectionCount}>/ 06</Text></Text><Text style={styles.collectionHint}>500 ML OF PERSONALITY</Text></View>
+              <View style={styles.collectionHeading}><Text style={styles.collectionTitle}>THE LINEUP <Text style={styles.collectionCount}>/ {String(products.length).padStart(2, "0")}</Text></Text><Text style={styles.collectionHint}>EXPLORE THE DRINKS</Text></View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
                 {CATEGORIES.map(item => (
                   <TouchableOpacity key={item} accessibilityRole="button" accessibilityState={{ selected: category === item }} accessibilityLabel={`Filter: ${item}`} onPress={() => setCategory(item)} style={[styles.filter, category === item && styles.filterActive]}>
@@ -282,17 +264,17 @@ export default function App() {
                   const available = product.stock - count;
                   return (
                     <View key={product.id} style={[styles.productCard, { width: tiny ? "100%" : isWide ? "31%" : "48%" }]}>
-                      <View style={[styles.productArt, { backgroundColor: product.tint, height: isWide ? 168 : 148 }]}>
-                        <View style={styles.cardTopLine}><Text style={styles.productCode}>NO. 0{product.id}</Text><View style={[styles.typeBadge, { backgroundColor: product.color }]}><Text style={styles.typeSymbol}>{product.symbol}</Text></View></View>
-                        <View style={[styles.productHalo, { backgroundColor: product.color }]} />
+                      <View style={[styles.productArt, { backgroundColor: productTint(product), height: isWide ? 168 : 148 }]}>
+                        <View style={styles.cardTopLine}><Text style={styles.productCode}>NO. 0{product.id}</Text><View style={[styles.typeBadge, { backgroundColor: productColor(product) }]}><Text style={styles.typeSymbol}>{product.emoji}</Text></View></View>
+                        <View style={[styles.productHalo, { backgroundColor: productColor(product) }]} />
                         <View style={{ marginTop: 10 }}><DrinkCan product={product} scale={isWide ? 0.91 : 0.78} rotate="-7deg" /></View>
                         {product.stock === 0 && <View style={styles.soldOverlay}><Text style={styles.soldLabel}>SOLD OUT</Text></View>}
-                        {product.sugar === 0 && <View style={styles.zeroBadge}><Text style={styles.zeroBadgeText}>ZERO SUGAR</Text></View>}
+                        
                       </View>
                       <View style={[styles.productInfo, !isWide && { padding: 12 }]}>
                         <Text style={[styles.productName, !isWide && { fontSize: 16 }]}>{product.name}</Text>
-                        <Text style={styles.productFlavor}>{product.flavor}</Text>
-                        <View style={styles.nutritionRow}><Text style={styles.nutritionText}>{product.caffeine}mg caffeine</Text><Text style={styles.nutritionDivider}>·</Text><Text style={styles.nutritionText}>{product.sugar}g sugar</Text></View>
+                        <Text style={styles.productFlavor}>{product.category.toUpperCase()}</Text>
+                        <Text style={[styles.nutritionText, { marginTop: 10, lineHeight: 15 }]}>{product.description || "Hydration beverage"}</Text>
                         <View style={styles.cardPriceRow}><Text style={styles.price}>{money(product.price)}</Text><Text style={[styles.stockText, !available && { color: "#8A4962" }]}>{available ? `${available} left` : product.stock ? "All in cart" : "Sold out"}</Text></View>
                         {count > 0 ? (
                           <QuantityControl product={product} count={count} add={() => addToCart(product)} remove={() => removeFromCart(product.id)} />
@@ -306,7 +288,7 @@ export default function App() {
                   );
                 })}
               </View>
-              <Text style={styles.catalogFootnote}>DEMO MODE · FICTIONAL DRINKS · NO REAL PAYMENTS</Text>
+              <Text style={styles.catalogFootnote}>DEMO MODE · SAMPLE PRICES · NO REAL PAYMENTS</Text>
             </ScrollView>
             <View style={[styles.cartDock, !isWide && { paddingHorizontal: 18 }]}>
               <View style={styles.dockInfo}><View style={styles.dockCount}><Text style={styles.dockCountText}>{cartCount}</Text></View><View><Text style={styles.dockLabel}>{tiny ? "YOUR ENERGY MIX" : cartCount ? "YOUR ENERGY MIX" : "BUILD YOUR ENERGY MIX"}</Text><Text style={styles.dockTotal}>{money(total)}{!tiny && <Text style={styles.dockTotalCaption}>  / {cartCount} {cartCount === 1 ? "drink" : "drinks"}</Text>}</Text></View></View>
@@ -332,15 +314,15 @@ export default function App() {
                 <View style={{ flex: 1, width: "100%" }}>
                   {products.filter(p => (cart[p.id] || 0) > 0).map(product => (
                     <View key={product.id} style={styles.cartItem}>
-                      <View style={[styles.cartCanBox, { backgroundColor: product.tint }]}><DrinkCan product={product} scale={0.48} rotate="-7deg" /></View>
+                      <View style={[styles.cartCanBox, { backgroundColor: productTint(product) }]}><DrinkCan product={product} scale={0.48} rotate="-7deg" /></View>
                       <View style={styles.cartItemInfo}>
                         <Text style={[styles.productName, { fontSize: 17 }]}>{product.name}</Text>
-                        <Text style={styles.cartItemDetail}>{money(product.price)} each · 500 ml</Text>
+                        <Text style={styles.cartItemDetail}>{money(product.price)} each · {product.category}</Text>
                         <View style={styles.cartItemBottom}><View style={{ width: 126 }}><QuantityControl product={product} count={cart[product.id]} add={() => addToCart(product)} remove={() => removeFromCart(product.id)} /></View><Text style={styles.cartLineTotal}>{money(product.price * cart[product.id])}</Text></View>
                       </View>
                     </View>
                   ))}
-                  <View style={styles.mixNote}><Text style={styles.mixNoteIcon}>✦</Text><Text style={styles.mixNoteText}>A little citrus. A little berry. A lot of main-character energy.</Text></View>
+                  <View style={styles.mixNote}><Text style={styles.mixNoteIcon}>✦</Text><Text style={styles.mixNoteText}>Your hydration picks, ready for simulated checkout.</Text></View>
                 </View>
                 <View style={[styles.receipt, isWide && { width: 306 }]}>
                   <View style={styles.receiptHeading}><Text style={styles.receiptTitle}>THE GAME PLAN</Text><Text style={styles.receiptBolt}>ϟ</Text></View>
