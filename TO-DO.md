@@ -15,3 +15,4 @@ Minor Task:
 5) Ideally, getting around 15 fake drinks for users to purchase.
 6) Make the starting page a little more dynamic, have moving images. Make the Start button more pronounced and readable
 7) Re do the directory to add the relevant files needed for this project.
+8) Make the app offline instead of having to spin an instance from a local host.
