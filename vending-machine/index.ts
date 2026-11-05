@@ -1,3 +1,5 @@
+// Expo entry point. Registers the App component as the application root.
+
 import { registerRootComponent } from 'expo';
 
 import App from './App';

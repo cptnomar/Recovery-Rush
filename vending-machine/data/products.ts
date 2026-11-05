@@ -1,3 +1,7 @@
+// Product data contract and demo inventory. App.tsx clones this initial list
+// into React state so simulated purchases do not mutate the source data.
+
+// Every product has an ID, display information, price, and remaining stock.
 export type Product = {
   id: number;
   name: string;
