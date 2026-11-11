@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   SafeAreaView,
   View,
@@ -8,11 +8,23 @@ import {
   StyleSheet,
   StatusBar,
   useWindowDimensions,
+  TextInput,
+  KeyboardAvoidingView,
+  Keyboard,
+  Platform,
+  BackHandler,
+  Animated,
+  AccessibilityInfo,
+  ActivityIndicator,
+  Image,
+  type ImageSourcePropType,
 } from "react-native";
 
-// A self-contained Expo / React Native demo. No assets or extra packages needed.
+import { initialProducts } from "./data/products";
+
+// Local simulation only: no NFC hardware, real card data, or payment services.
 // The drinks, nutrition labels, and purchases in this demo are fictional.
-type Category = "All drinks" | "Citrus" | "Berry" | "Tropical" | "Zero sugar";
+type Category = "All drinks" | "Citrus" | "Berry" | "Tropical" | "Zero sugar" | "Hydration";
 type Screen = "welcome" | "catalog" | "cart" | "success";
 type Product = {
   id: number;
@@ -23,15 +35,23 @@ type Product = {
   stock: number;
   color: string;
   tint: string;
-  category: "Citrus" | "Berry" | "Tropical";
-  sugar: number;
-  caffeine: number;
+  category: "Citrus" | "Berry" | "Tropical" | "Hydration";
+  description?: string;
+  sugar: number | null;
+  caffeine: number | null;
   symbol: string;
 };
 
 const INK = "#14212B";
 const YELLOW = "#FFDE32";
 const AQUA = "#61E8D3";
+const PRODUCT_IMAGES: Record<string, ImageSourcePropType> = {
+  Gatorade: require("./assets/products/gatorade.png"),
+  Powerade: require("./assets/products/powerade.png"),
+  Electrolit: require("./assets/products/electrolit.png"),
+  BODYARMOR: require("./assets/products/bodyarmor.png"),
+  Propel: require("./assets/products/propel.png"),
+};
 const INITIAL_PRODUCTS: Product[] = [
   { id: 1, name: "Lightning Lime", flavor: "LIME + LEMON", shortName: "LIME", price: 3.5, stock: 12, color: "#C2EC49", tint: "#F0F8D5", category: "Citrus", sugar: 0, caffeine: 160, symbol: "ϟ" },
   { id: 2, name: "Berry Burst", flavor: "RASPBERRY + CHERRY", shortName: "BERRY", price: 3.75, stock: 8, color: "#F99AC1", tint: "#FDE8F1", category: "Berry", sugar: 8, caffeine: 160, symbol: "✦" },
@@ -40,7 +60,14 @@ const INITIAL_PRODUCTS: Product[] = [
   { id: 5, name: "Cosmic Grape", flavor: "GRAPE + ACAI", shortName: "COSMIC", price: 3.75, stock: 9, color: "#BFA4EE", tint: "#F0E9FB", category: "Berry", sugar: 0, caffeine: 160, symbol: "✧" },
   { id: 6, name: "Tropical Charge", flavor: "MANGO + PASSION FRUIT", shortName: "TROPIC", price: 4, stock: 7, color: "#F6D658", tint: "#FFF7D9", category: "Tropical", sugar: 8, caffeine: 160, symbol: "ϟ" },
 ];
-const CATEGORIES: Category[] = ["All drinks", "Citrus", "Berry", "Tropical", "Zero sugar"];
+// Preserve the existing demo lineup and the assigned products' data.
+INITIAL_PRODUCTS.push(...initialProducts.filter(p => p.id >= 9 && p.id <= 13).map(p => ({
+  ...p, flavor: "HYDRATION", shortName: p.name, color: AQUA, tint: "#E1F6F4",
+  category: "Hydration" as const, sugar: null, caffeine: null, symbol: "+",
+})));
+const MOCK_NFC_ID = "COUGAR-DEMO";
+type Receipt = { total: number; count: number; items: { product: Product; quantity: number }[] };
+const CATEGORIES: Category[] = ["All drinks", "Citrus", "Berry", "Tropical", "Zero sugar", "Hydration"];
 const money = (amount: number) => "$" + amount.toFixed(2);
 
 function DotPattern({ color = INK }: { color?: string }) {
@@ -53,8 +80,24 @@ function DotPattern({ color = INK }: { color?: string }) {
   );
 }
 
-// The can artwork is built from native Views and Text, so it works offline.
+// Shared across catalog, checkout and receipt. Photos are bundled for offline use;
+// the original fictional drinks retain their native artwork.
 function DrinkCan({ product, scale = 1, rotate = "0deg" }: { product: Product; scale?: number; rotate?: string }) {
+  const image = PRODUCT_IMAGES[product.name];
+  if (image) {
+    return <Image
+      source={image}
+      accessibilityLabel={`${product.name} product photo`}
+      resizeMode="contain"
+      style={{ width: 110 * scale, height: 150 * scale, transform: [{ rotate: rotate as `${number}deg` }] }}
+    />;
+  }
+  if (product.category === "Hydration") {
+    return <View style={{ width: 110 * scale, height: 150 * scale, alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ color: INK, fontSize: 12 * scale, fontWeight: "800", textAlign: "center" }}>{product.name}</Text>
+      <Text style={{ color: INK, fontSize: 10 * scale, textAlign: "center", marginTop: 8 }}>Photo unavailable</Text>
+    </View>;
+  }
   return (
     <View
       accessible={false}
@@ -123,14 +166,76 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>(() => INITIAL_PRODUCTS.map(p => ({ ...p })));
   const [cart, setCart] = useState<Record<number, number>>({});
   const [category, setCategory] = useState<Category>("All drinks");
-  const [receipt, setReceipt] = useState({ total: 0, count: 0 });
+  const [receipt, setReceipt] = useState<Receipt>({ total: 0, count: 0, items: [] });
   const [checkoutError, setCheckoutError] = useState("");
+  const [nfcInput, setNfcInput] = useState("");
+  const [verifiedCart, setVerifiedCart] = useState<string | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const verificationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const completed = useRef(false);
+  const [fade] = useState(() => new Animated.Value(1));
+  const cartKey = JSON.stringify(cart);
+  const nfcVerified = verifiedCart === cartKey;
+
+  const resetNfc = useCallback(() => {
+    if (verificationTimer.current) clearTimeout(verificationTimer.current);
+    verificationTimer.current = null;
+    setVerifying(false);
+    setVerifiedCart(null);
+    setNfcInput("");
+    setCheckoutError("");
+  }, []);
+
+  const navigate = useCallback((next: Screen) => {
+    if (next === screen) return;
+    Keyboard.dismiss();
+    resetNfc();
+    completed.current = false;
+    setScreen(next);
+  }, [screen, resetNfc]);
+
+  useEffect(() => () => {
+    if (verificationTimer.current) clearTimeout(verificationTimer.current);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(reduced => {
+      if (!active || reduced) return;
+      fade.setValue(0.65);
+      Animated.timing(fade, { toValue: 1, duration: 180, useNativeDriver: true }).start();
+    }).catch(() => {});
+    const back = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (screen === "welcome") return false;
+      navigate(screen === "cart" || screen === "success" ? "catalog" : "welcome");
+      return true;
+    });
+    return () => { active = false; fade.stopAnimation(); back.remove(); };
+  }, [screen, fade, navigate]);
+
+  function verifyNfc(identifier: string) {
+    resetNfc();
+    setNfcInput(identifier);
+    if (screen !== "cart" || !cartCount) return;
+    if (identifier !== MOCK_NFC_ID) {
+      setCheckoutError("Card not recognized. For this simulation, enter COUGAR-DEMO exactly or use Simulate card tap.");
+      return;
+    }
+    Keyboard.dismiss();
+    setVerifying(true);
+    verificationTimer.current = setTimeout(() => {
+      verificationTimer.current = null;
+      setVerifiedCart(cartKey);
+      setVerifying(false);
+    }, 600);
+  }
+
   const cartCount = Object.values(cart).reduce((a, b) => a + b, 0);
   const total = products.reduce((sum, p) => sum + p.price * (cart[p.id] || 0), 0);
   const visibleProducts = products.filter(p => category === "All drinks" || (category === "Zero sugar" ? p.sugar === 0 : p.category === category));
 
   function addToCart(product: Product) {
-    setCheckoutError("");
+    resetNfc();
     setCart(old => {
       const count = old[product.id] || 0;
       return count >= product.stock ? old : { ...old, [product.id]: count + 1 };
@@ -138,7 +243,7 @@ export default function App() {
   }
 
   function removeFromCart(id: number) {
-    setCheckoutError("");
+    resetNfc();
     setCart(old => {
       const updated = { ...old };
       if ((updated[id] || 0) <= 1) delete updated[id];
@@ -148,15 +253,21 @@ export default function App() {
   }
 
   function checkout() {
-    if (!cartCount) return;
+    if (completed.current || screen !== "cart" || !cartCount) return;
+    // Enforce verification here as well as disabling the checkout control.
+    if (!nfcVerified || verifying || nfcInput !== MOCK_NFC_ID) {
+      setCheckoutError("Verify a simulated CougarCard before completing your order.");
+      return;
+    }
     if (products.some(p => (cart[p.id] || 0) > p.stock)) {
       setCheckoutError("One of your drinks is out of stock. Please update your cart.");
       return;
     }
-    setReceipt({ total, count: cartCount });
+    completed.current = true;
+    setReceipt({ total, count: cartCount, items: products.filter(p => cart[p.id]).map(product => ({ product: { ...product }, quantity: cart[product.id] })) });
     setProducts(old => old.map(p => ({ ...p, stock: p.stock - (cart[p.id] || 0) })));
     setCart({});
-    setCheckoutError("");
+    resetNfc();
     setScreen("success");
   }
 
@@ -164,9 +275,9 @@ export default function App() {
     setProducts(INITIAL_PRODUCTS.map(p => ({ ...p })));
     setCart({});
     setCategory("All drinks");
-    setReceipt({ total: 0, count: 0 });
+    setReceipt({ total: 0, count: 0, items: [] });
     setCheckoutError("");
-    setScreen("welcome");
+    navigate("welcome");
   }
 
   const step = screen === "catalog" ? 1 : screen === "cart" ? 2 : 3;
@@ -174,12 +285,13 @@ export default function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" />
-      <View style={[styles.machine, isWide && styles.machineWide]}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={[styles.machine, isWide && styles.machineWide]}>
+      <Animated.View style={{ flex: 1, opacity: fade }}>
         <View style={[styles.header, !isWide && styles.headerCompact]}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Recovery Rush home" onPress={() => setScreen("welcome")} style={styles.brand}>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Recovery Rush home" onPress={() => navigate("welcome")} style={styles.brand}>
             <View style={styles.logoTile}><Text style={styles.logoBolt}>ϟ</Text></View>
             <View>
-              <Text style={styles.logoText}>RECOVERY RUSH<Text style={{ color: YELLOW }}>.</Text></Text>
+              <Text style={[styles.logoText, tiny && { fontSize: 15 }]}>RECOVERY RUSH<Text style={{ color: YELLOW }}>.</Text></Text>
               <Text style={styles.logoSub}>THE ENERGY STATION</Text>
             </View>
           </TouchableOpacity>
@@ -188,8 +300,8 @@ export default function App() {
             {screen === "welcome" ? (
               <View style={styles.editionTag}><Text style={styles.editionText}>VOL. 01</Text></View>
             ) : (
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`View cart, ${cartCount} drinks`} onPress={() => setScreen("cart")} style={styles.headerCart}>
-                <Text style={styles.headerCartText}>CART</Text><View style={styles.cartBadge}><Text style={styles.cartBadgeText}>{cartCount}</Text></View>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel={`View cart, ${cartCount} drinks`} onPress={() => navigate("cart")} style={styles.headerCart}>
+                <Text style={[styles.headerCartText, tiny && { fontSize: 8 }]}>CART</Text><View style={styles.cartBadge}><Text style={styles.cartBadgeText}>{cartCount}</Text></View>
               </TouchableOpacity>
             )}
           </View>
@@ -201,8 +313,8 @@ export default function App() {
               <View style={[styles.welcomeCopy, isWide && { flex: 1, paddingRight: 0 }]}>
                 <View style={styles.seriesPill}><Text style={styles.seriesText}>ϟ THE VOLT COLLECTION</Text></View>
                 <Text style={[styles.heroTitle, { fontSize: isWide ? 66 : 48, lineHeight: isWide ? 65 : 48 }]}>BIG FLAVOR.{"\n"}FULL <Text style={styles.heroOutline}>CHARGE.</Text></Text>
-                <Text style={styles.heroDescription}>Meet your next power-up. Six electric flavors, one very good decision.</Text>
-                <View style={styles.heroButton}><ActionButton label="CHOOSE YOUR ENERGY" onPress={() => setScreen("catalog")} /></View>
+                <Text style={styles.heroDescription}>Meet your next power-up. Electric flavors and hydration favorites, one very good decision.</Text>
+                <View style={styles.heroButton}><ActionButton label="CHOOSE YOUR ENERGY" onPress={() => navigate("catalog")} /></View>
                 <Text style={styles.heroNote}>ICE COLD. READY WHEN YOU ARE.</Text>
               </View>
               <View style={[styles.heroArtwork, { height: isWide ? 430 : 300 }, isWide && { width: "46%" }]}>
@@ -219,7 +331,7 @@ export default function App() {
               </View>
             </View>
             <View style={styles.ticker}>
-              <Text style={styles.tickerText}>SIX FLAVORS</Text><Text style={styles.tickerStar}>✦</Text>
+              <Text style={styles.tickerText}>FIND YOUR FLAVOR</Text><Text style={styles.tickerStar}>✦</Text>
               <Text style={styles.tickerText}>ZERO BORING</Text><Text style={styles.tickerStar}>✦</Text>
               <Text style={styles.tickerText}>ALL ENERGY</Text>
             </View>
@@ -234,7 +346,7 @@ export default function App() {
                 ))}
               </View>
             </View>
-            <View style={styles.demoFooter}><Text style={styles.demoFooterText}>INTERACTIVE DEMO · FICTIONAL DRINKS · NO REAL PAYMENTS</Text></View>
+            <View style={styles.demoFooter}><Text style={styles.demoFooterText}>INTERACTIVE DEMO · SAMPLE INVENTORY · NO REAL PAYMENTS</Text></View>
           </ScrollView>
         )}
 
@@ -267,7 +379,7 @@ export default function App() {
                 <DotPattern />
               </View>
 
-              <View style={styles.collectionHeading}><Text style={styles.collectionTitle}>THE LINEUP <Text style={styles.collectionCount}>/ 06</Text></Text><Text style={styles.collectionHint}>500 ML OF PERSONALITY</Text></View>
+              <View style={styles.collectionHeading}><Text style={styles.collectionTitle}>THE LINEUP <Text style={styles.collectionCount}>/ {products.length}</Text></Text><Text style={styles.collectionHint}>PICK YOUR NEXT DRINK</Text></View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
                 {CATEGORIES.map(item => (
                   <TouchableOpacity key={item} accessibilityRole="button" accessibilityState={{ selected: category === item }} accessibilityLabel={`Filter: ${item}`} onPress={() => setCategory(item)} style={[styles.filter, category === item && styles.filterActive]}>
@@ -292,7 +404,8 @@ export default function App() {
                       <View style={[styles.productInfo, !isWide && { padding: 12 }]}>
                         <Text style={[styles.productName, !isWide && { fontSize: 16 }]}>{product.name}</Text>
                         <Text style={styles.productFlavor}>{product.flavor}</Text>
-                        <View style={styles.nutritionRow}><Text style={styles.nutritionText}>{product.caffeine}mg caffeine</Text><Text style={styles.nutritionDivider}>·</Text><Text style={styles.nutritionText}>{product.sugar}g sugar</Text></View>
+                        {product.caffeine !== null && <View style={styles.nutritionRow}><Text style={styles.nutritionText}>{product.caffeine}mg caffeine</Text><Text style={styles.nutritionDivider}>·</Text><Text style={styles.nutritionText}>{product.sugar}g sugar</Text></View>}
+                        {!!product.description && <Text style={styles.productDescription}>{product.description}</Text>}
                         <View style={styles.cardPriceRow}><Text style={styles.price}>{money(product.price)}</Text><Text style={[styles.stockText, !available && { color: "#8A4962" }]}>{available ? `${available} left` : product.stock ? "All in cart" : "Sold out"}</Text></View>
                         {count > 0 ? (
                           <QuantityControl product={product} count={count} add={() => addToCart(product)} remove={() => removeFromCart(product.id)} />
@@ -306,18 +419,18 @@ export default function App() {
                   );
                 })}
               </View>
-              <Text style={styles.catalogFootnote}>DEMO MODE · FICTIONAL DRINKS · NO REAL PAYMENTS</Text>
+              <Text style={styles.catalogFootnote}>DEMO MODE · SAMPLE INVENTORY · NO REAL PAYMENTS</Text>
             </ScrollView>
             <View style={[styles.cartDock, !isWide && { paddingHorizontal: 18 }]}>
               <View style={styles.dockInfo}><View style={styles.dockCount}><Text style={styles.dockCountText}>{cartCount}</Text></View><View><Text style={styles.dockLabel}>{tiny ? "YOUR ENERGY MIX" : cartCount ? "YOUR ENERGY MIX" : "BUILD YOUR ENERGY MIX"}</Text><Text style={styles.dockTotal}>{money(total)}{!tiny && <Text style={styles.dockTotalCaption}>  / {cartCount} {cartCount === 1 ? "drink" : "drinks"}</Text>}</Text></View></View>
-              <TouchableOpacity accessibilityRole="button" accessibilityLabel="View cart" accessibilityState={{ disabled: cartCount === 0 }} disabled={cartCount === 0} onPress={() => setScreen("cart")} style={[styles.dockButton, !cartCount && styles.dockDisabled]}><Text style={styles.dockButtonText}>{isWide ? "REVIEW YOUR CART" : "VIEW CART"}  →</Text></TouchableOpacity>
+              <TouchableOpacity accessibilityRole="button" accessibilityLabel="View cart" accessibilityState={{ disabled: cartCount === 0 }} disabled={cartCount === 0} onPress={() => navigate("cart")} style={[styles.dockButton, !cartCount && styles.dockDisabled]}><Text style={styles.dockButtonText}>{isWide ? "REVIEW YOUR CART" : "VIEW CART"}  →</Text></TouchableOpacity>
             </View>
           </>
         )}
 
         {screen === "cart" && (
-          <ScrollView key="cart" contentContainerStyle={[styles.cartContent, !isWide && styles.contentCompact]}>
-            <TouchableOpacity accessibilityRole="button" onPress={() => setScreen("catalog")} style={styles.backButton}><Text style={styles.backText}>← BACK TO THE LINEUP</Text></TouchableOpacity>
+          <ScrollView keyboardShouldPersistTaps="handled" key="cart" contentContainerStyle={[styles.cartContent, !isWide && styles.contentCompact]}>
+            <TouchableOpacity accessibilityRole="button" onPress={() => navigate("catalog")} style={styles.backButton}><Text style={styles.backText}>← BACK TO THE LINEUP</Text></TouchableOpacity>
             <Text style={[styles.pageTitle, !isWide && { fontSize: 35, lineHeight: 39 }]}>YOUR ENERGY MIX<Text style={{ color: "#6A897C" }}>.</Text></Text>
             <Text style={styles.pageSubtitle}>Good choices. Great taste. Ready when you are.</Text>
             {cartCount === 0 ? (
@@ -325,7 +438,7 @@ export default function App() {
                 <View style={styles.emptyIcon}><Text style={styles.emptyBolt}>ϟ</Text></View>
                 <Text style={styles.emptyTitle}>Running on empty?</Text>
                 <Text style={styles.emptyText}>Your next favorite flavor is waiting in the lineup.</Text>
-                <View style={{ width: "100%", maxWidth: 350 }}><ActionButton label="EXPLORE THE DRINKS" onPress={() => setScreen("catalog")} /></View>
+                <View style={{ width: "100%", maxWidth: 350 }}><ActionButton label="EXPLORE THE DRINKS" onPress={() => navigate("catalog")} /></View>
               </View>
             ) : (
               <View style={[styles.checkoutLayout, isWide && { flexDirection: "row", alignItems: "flex-start" }]}>
@@ -335,7 +448,7 @@ export default function App() {
                       <View style={[styles.cartCanBox, { backgroundColor: product.tint }]}><DrinkCan product={product} scale={0.48} rotate="-7deg" /></View>
                       <View style={styles.cartItemInfo}>
                         <Text style={[styles.productName, { fontSize: 17 }]}>{product.name}</Text>
-                        <Text style={styles.cartItemDetail}>{money(product.price)} each · 500 ml</Text>
+                        <Text style={styles.cartItemDetail}>{money(product.price)} each{product.category !== "Hydration" ? " · 500 ml" : ""}</Text>
                         <View style={styles.cartItemBottom}><View style={{ width: 126 }}><QuantityControl product={product} count={cart[product.id]} add={() => addToCart(product)} remove={() => removeFromCart(product.id)} /></View><Text style={styles.cartLineTotal}>{money(product.price * cart[product.id])}</Text></View>
                       </View>
                     </View>
@@ -349,7 +462,21 @@ export default function App() {
                   <View style={styles.receiptDivider} />
                   <View style={styles.receiptRow}><Text style={styles.receiptTotalLabel}>TOTAL</Text><Text style={styles.receiptTotal}>{money(total)}</Text></View>
                   {!!checkoutError && <Text accessibilityRole="alert" style={styles.errorText}>{checkoutError}</Text>}
-                  <ActionButton label="POWER UP" onPress={checkout} hint="Complete a simulated purchase. No payment is charged." />
+                  <View style={styles.nfcPanel}>
+                    <Text style={styles.receiptTitle}>SIMULATED COUGARCARD</Text>
+                    <Text style={styles.nfcHelp}>1. Simulate a card tap or enter COUGAR-DEMO.
+2. Wait for verification, then complete your demo order.</Text>
+                    <ActionButton label="SIMULATE CARD TAP" onPress={() => verifyNfc(MOCK_NFC_ID)} disabled={verifying} light />
+                    <Text style={styles.nfcHelp}>Manual test identifier (demo data only)</Text>
+                    <TextInput accessibilityLabel="Simulated NFC identifier" value={nfcInput} onChangeText={value => { resetNfc(); setNfcInput(value); }} autoCapitalize="characters" autoCorrect={false} placeholder="COUGAR-DEMO" placeholderTextColor="#65705C" style={styles.nfcInput} returnKeyType="done" onSubmitEditing={() => verifyNfc(nfcInput)} />
+                    <ActionButton label="VERIFY TEST INPUT" onPress={() => verifyNfc(nfcInput)} disabled={verifying || !nfcInput} />
+                    <View accessibilityLiveRegion="polite" style={styles.nfcStatus}>
+                      {verifying && <ActivityIndicator color={INK} />}
+                      <Text style={styles.nfcHelp}>{verifying ? "Verifying simulated card…" : nfcVerified ? "✓ Demo card verified for this order." : "Card verification required. Order changes require a new tap."}</Text>
+                    </View>
+                    <Text style={styles.receiptNote}>Simulation only. No physical NFC support. Do not enter real card data.</Text>
+                  </View>
+                  <ActionButton label="COMPLETE DEMO ORDER" onPress={checkout} disabled={!nfcVerified || verifying} hint="Requires a verified simulated card. No payment is charged." />
                   <View style={styles.demoPill}><Text style={styles.demoPillText}>DEMO CHECKOUT · NO CHARGE</Text></View>
                   <Text style={styles.receiptNote}>This is a vending-machine simulation. No payment or physical dispensing takes place.</Text>
                 </View>
@@ -363,21 +490,32 @@ export default function App() {
             <View style={styles.successCard}>
               <View style={styles.successArt}><View style={styles.successRing} /><View style={styles.successCheck}><Text style={styles.successCheckText}>✓</Text></View><Text style={styles.successSparkLeft}>✦</Text><Text style={styles.successSparkRight}>✦</Text></View>
               <View style={styles.successPill}><Text style={styles.successPillText}>MISSION COMPLETE</Text></View>
-              <Text style={[styles.successTitle, { fontSize: isWide ? 56 : 42, lineHeight: isWide ? 55 : 43 }]}>YOU'RE ALL{"\n"}CHARGED UP.</Text>
+              <Text style={[styles.successTitle, { fontSize: isWide ? 56 : 42, lineHeight: isWide ? 55 : 43 }]}>{"YOU'RE ALL\nCHARGED UP."}</Text>
               <Text style={styles.successDescription}>Excellent taste. Your simulated order is complete.</Text>
               <View style={styles.successSummary}><View><Text style={styles.successSummaryLabel}>DRINKS IN YOUR MIX</Text><Text style={styles.successSummaryValue}>{receipt.count.toString().padStart(2, "0")}</Text></View><View style={styles.summaryLine} /><View><Text style={styles.successSummaryLabel}>SIMULATED TOTAL</Text><Text style={styles.successSummaryValue}>{money(receipt.total)}</Text></View></View>
-              <View style={{ width: "100%", maxWidth: 360 }}><ActionButton label="BACK TO THE LINEUP" onPress={() => setScreen("catalog")} /></View>
+              {receipt.items.map(({ product, quantity }) => <View key={product.id} style={[styles.cartItem, { width: "100%" }]}>
+                <DrinkCan product={product} scale={0.5} />
+                <View style={styles.cartItemInfo}><Text style={styles.productName}>{product.name}</Text><Text style={styles.cartItemDetail}>{quantity} × {money(product.price)}</Text></View>
+              </View>)}
+              <Text style={styles.nfcHelp}>Simulated CougarCard verified · No charge</Text>
+              <View style={{ width: "100%", maxWidth: 360 }}><ActionButton label="BACK TO THE LINEUP" onPress={() => navigate("catalog")} /></View>
               <TouchableOpacity accessibilityRole="button" onPress={resetDemo} style={styles.resetButton}><Text style={styles.resetText}>↻ Reset demo & restock</Text></TouchableOpacity>
               <Text style={styles.successFootnote}>NO PAYMENT WAS TAKEN. NO DRINK WAS DISPENSED.</Text>
             </View>
           </ScrollView>
         )}
-      </View>
+      </Animated.View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  nfcPanel: { gap: 12, marginBottom: 18, borderTopWidth: 1, borderTopColor: "#CBD0AD", paddingTop: 18 },
+  nfcHelp: { fontSize: 12, lineHeight: 19, color: INK },
+  nfcInput: { minHeight: 48, borderWidth: 1, borderColor: "#65705C", borderRadius: 7, backgroundColor: "#FFFFFF", paddingHorizontal: 12, color: INK, fontSize: 16 },
+  nfcStatus: { flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" },
+  productDescription: { fontSize: 11, lineHeight: 16, color: "#5C6A59", marginTop: 10 },
   safe: { flex: 1, backgroundColor: "#0D171F", alignItems: "center" },
   machine: { flex: 1, width: "100%", maxWidth: 1120, backgroundColor: "#F8F9F4", overflow: "hidden" },
   machineWide: { marginVertical: 22, width: "94%", borderRadius: 20, borderWidth: 1, borderColor: "#36444A" },
@@ -506,7 +644,7 @@ const styles = StyleSheet.create({
   addLabel: { color: "#FFFFFF", fontSize: 8, letterSpacing: 0.6, fontWeight: "800" },
   addPlus: { color: YELLOW, fontSize: 24, lineHeight: 28, fontWeight: "600" },
   quantityControl: { minHeight: 42, backgroundColor: "#F3F6EE", borderWidth: 1, borderColor: "#CDD7C6", borderRadius: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", overflow: "hidden" },
-  quantityButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
+  quantityButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center" },
   quantitySymbol: { color: INK, fontSize: 22, fontWeight: "600" },
   quantityNumber: { color: INK, fontWeight: "900", fontSize: 15 },
   catalogFootnote: { fontSize: 9, color: "#77816F", textAlign: "center", marginTop: 24, marginBottom: 3, lineHeight: 15 },
