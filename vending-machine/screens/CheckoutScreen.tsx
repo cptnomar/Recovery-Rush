@@ -1,41 +1,36 @@
-// Single-item review page. Shows the chosen drink and calls App.tsx to
-// confirm the simulated purchase; it does not update inventory directly.
-
+import ProductPhoto from "../components/ProductPhoto";
+// Product detail and selection review. Payment happens only from the cart.
 import React from "react";
 import { View, Text, TouchableOpacity, ScrollView } from "react-native";
 import type { Product } from "../data/products";
 import { styles } from "../styles/theme";
-import { ActionButton, DrinkCan, DotPattern, money, productColor, productTint } from "../components/ui";
+import { ActionButton, DrinkCan, HealthNotice, money, productTint } from "../components/ui";
 
-export default function CheckoutScreen({ selected, isWide, checkoutError, onBack, onPurchase }: { selected: Product | undefined; isWide: boolean; checkoutError: string; onBack: () => void; onPurchase: () => void }) {
+type Props = { selected: Product | undefined; inCart: number; cartCount: number; isWide: boolean; onBack: () => void; onAdd: () => void; onReviewCart: () => void };
+export default function CheckoutScreen({ selected, inCart, cartCount, isWide, onBack, onAdd, onReviewCart }: Props) {
+  const available = selected ? Math.max(0, selected.stock - inCart) : 0;
   return (
-          <ScrollView contentContainerStyle={[styles.cartContent, styles.checkoutScreen]}>
-            <TouchableOpacity accessibilityRole="button" onPress={() => onBack()} style={styles.backButton}><Text style={styles.backText}>← BACK TO DRINKS</Text></TouchableOpacity>
-            <Text style={[styles.pageTitle, styles.centeredTitle, !isWide && { fontSize: 30 }]}>CONFIRM YOUR SELECTION</Text>
-            <Text style={[styles.pageSubtitle, styles.centeredTitle]}>Review your drink before purchasing.</Text>
-            {/* The product is optional while navigating; only show details when selected. */}
-            {selected && (
-              <View style={[styles.selectionCard, isWide && styles.selectionCardWide]}>
-                <View style={[styles.selectionArtwork, { backgroundColor: productTint(selected) }]}>
-                  <DrinkCan product={selected} scale={isWide ? 1.45 : 1.12} />
-                </View>
-                <View style={styles.selectionDetails}>
-                  <Text style={styles.selectionName}>{selected.name}</Text>
-                  <Text style={styles.selectionCategory}>{selected.category}</Text>
-                  <Text style={styles.selectionDescription}>{selected.description || "Hydration beverage"}</Text>
-                  <Text style={styles.selectionPrice}>{money(selected.price)}</Text>
-                  <Text style={styles.selectionStock}>In stock: {selected.stock}</Text>
-                </View>
-              </View>
-            )}
-            {/* The parent supplies stock-validation errors, if any. */}
-            {!!checkoutError && <Text accessibilityRole="alert" style={styles.errorText}>{checkoutError}</Text>}
-            <View style={styles.checkoutActions}>
-              <ActionButton label="PURCHASE DRINK" onPress={onPurchase} disabled={!selected || selected.stock <= 0} hint="Simulate purchasing one drink. No payment is charged." />
-              <TouchableOpacity accessibilityRole="button" style={styles.outlineButton} onPress={() => onBack()}><Text style={styles.outlineButtonText}>CHOOSE A DIFFERENT DRINK</Text></TouchableOpacity>
-              <Text style={styles.checkoutDisclaimer}>DEMO CHECKOUT · NO REAL PAYMENT OR DISPENSING</Text>
-            </View>
-          </ScrollView>
-
+    <ScrollView contentContainerStyle={[styles.cartContent, !isWide && styles.contentCompact, styles.checkoutScreen]}>
+      <TouchableOpacity accessibilityRole="button" onPress={onBack} style={styles.backButton}><Text style={styles.backText}>← BACK TO DRINKS</Text></TouchableOpacity>
+      <Text style={[styles.pageTitle, styles.centeredTitle, !isWide && { fontSize: 30, lineHeight: 35 }]}>MEET YOUR NEXT PICK.</Text>
+      <Text style={[styles.pageSubtitle, styles.centeredTitle]}>Review the drink, then add it to your cart.</Text>
+      {selected && <View style={[styles.selectionCard, isWide && styles.selectionCardWide]}>
+        <View style={[styles.selectionArtwork, { backgroundColor: productTint(selected) }]}><ProductPhoto product={selected} width={isWide ? 155 : 120} height={isWide ? 230 : 180} /></View>
+        <View style={styles.selectionDetails}>
+          <Text style={styles.selectionName}>{selected.name}</Text>
+          <Text style={styles.selectionCategory}>{selected.category}</Text>
+          <Text style={styles.selectionDescription}>{selected.description || "Hydration beverage"}</Text>
+          <Text style={styles.selectionPrice}>{money(selected.price)}</Text>
+          <Text style={styles.selectionStock}>{selected.stock === 0 ? "Sold out" : `${available} available to add · ${inCart} in your cart`}</Text>
+        </View>
+      </View>}
+      <View style={styles.checkoutActions}>
+        <HealthNotice />
+        <ActionButton label={available > 0 ? "ADD TO CART" : selected?.stock ? "ALL AVAILABLE DRINKS IN CART" : "SOLD OUT"} onPress={onAdd} disabled={available <= 0} hint="Add one drink and open your cart for review. No payment is charged." />
+        {cartCount > 0 && <TouchableOpacity accessibilityRole="button" accessibilityLabel="Review existing cart" style={styles.outlineButton} onPress={onReviewCart}><Text style={styles.outlineButtonText}>REVIEW CART ({cartCount})</Text></TouchableOpacity>}
+        <TouchableOpacity accessibilityRole="button" style={styles.outlineButton} onPress={onBack}><Text style={styles.outlineButtonText}>CONTINUE BROWSING</Text></TouchableOpacity>
+        <Text style={styles.checkoutDisclaimer}>DEMO ONLY · SAMPLE PRICES · NO REAL PAYMENT</Text>
+      </View>
+    </ScrollView>
   );
 }
