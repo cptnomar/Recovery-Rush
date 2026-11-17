@@ -17,4 +17,4 @@ The project intentionally uses **Option A**: screen selection through React stat
 - `npx expo start --clear`
 - `npx tsc --noEmit`
 
-Keep the one-drink-per-purchase demo behavior and randomized 3–5 second dispensing animation. Expo Go is the target for current testing.
+The user requested cart review: support multiple drinks, quantities, removal, and a single order review. Dispense one drink at a time with a randomized 3–5 second animation for each drink. Keep the supplied Recovery Rush logo and shared blue/orange palette. Display the no-hangover-cure notice on the footer, product details, cart, and confirmation. Expo Go is the target for current testing.
